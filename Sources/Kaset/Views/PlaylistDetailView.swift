@@ -187,9 +187,18 @@ struct PlaylistDetailView: View {
         if !artists.isEmpty {
             HStack(spacing: 0) {
                 ForEach(Array(artists.enumerated()), id: \.offset) { index, artist in
-                    Text(artist.name)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(.secondary)
+                    if detail.isAlbum, artist.hasNavigableId {
+                        NavigationLink(value: artist) {
+                            Text(artist.name)
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    } else {
+                        Text(artist.name)
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
 
                     if index < artists.count - 1 {
                         Text(", ")

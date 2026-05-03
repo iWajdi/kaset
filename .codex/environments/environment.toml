@@ -15,3 +15,8 @@ swift build
 swift test --skip KasetUITests
 KASET_SIGNING=adhoc Scripts/compile_and_run.sh --wait
 '''
+
+[[actions]]
+name = "B&R"
+icon = "run"
+command = "env KASET_SIGNING=adhoc Scripts/compile_and_run.sh --wait"
