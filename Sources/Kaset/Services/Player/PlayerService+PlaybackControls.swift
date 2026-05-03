@@ -82,6 +82,9 @@ extension PlayerService {
         self.songNearingEnd = false
         self.shouldSuppressAutoplayAfterQueueEnd = false
         self.currentTrack = song
+        self.currentTrackHasVideo = song.videoVersionVideoId != nil
+            || song.musicVideoType?.hasVideoContent == true
+            || song.hasVideo == true
 
         // Mark that we initiated this playback (to detect and correct YouTube's autoplay override)
         self.isKasetInitiatedPlayback = true

@@ -2,6 +2,13 @@ import Foundation
 import Observation
 import os
 
+// MARK: - NativePlaybackVersionMode
+
+enum NativePlaybackVersionMode: String, Equatable {
+    case song
+    case video
+}
+
 // MARK: - PlayerService
 
 /// Controls music playback via a hidden WKWebView.
@@ -161,6 +168,21 @@ final class PlayerService: NSObject, PlayerServiceProtocol {
 
     /// Whether the current track has video available.
     var currentTrackHasVideo: Bool = false
+
+    /// Whether the user-triggered audio/video version lookup is in flight.
+    var isResolvingPlaybackVersion: Bool = false
+
+    /// YouTube Music's native Song/Video switcher state, when present in the WebView.
+    var nativePlaybackVersionMode: NativePlaybackVersionMode?
+
+    /// Whether YouTube Music exposes a native Song/Video switcher for the current playback item.
+    var canUseNativePlaybackVersionSwitch = false
+
+    /// Target requested through YouTube Music's native Song/Video switcher.
+    var nativePlaybackVersionSwitchTarget: NativePlaybackVersionMode?
+
+    /// Grace window where an observed video-id change is allowed if metadata still matches the current song.
+    var nativePlaybackVersionSwitchGraceUntil: Date?
 
     /// Whether video mode is active (user has opened video window).
     /// Note: We don't auto-close based on currentTrackHasVideo here because

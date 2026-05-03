@@ -21,6 +21,12 @@ struct Song: Identifiable, Codable, Hashable {
     /// Use `musicVideoType?.hasVideoContent` to check if video is worth displaying.
     var musicVideoType: MusicVideoType?
 
+    /// Canonical audio-track video ID for this song, when it differs from `videoId`.
+    var audioVersionVideoId: String?
+
+    /// Official music-video ID for this song, when YouTube Music exposes one.
+    var videoVersionVideoId: String?
+
     /// Like/dislike status of the song (nil if unknown).
     var likeStatus: LikeStatus?
 
@@ -41,6 +47,8 @@ struct Song: Identifiable, Codable, Hashable {
         case isPlayable
         case hasVideo
         case musicVideoType
+        case audioVersionVideoId
+        case videoVersionVideoId
         case likeStatus
         case isInLibrary
         case feedbackTokens
@@ -58,6 +66,8 @@ struct Song: Identifiable, Codable, Hashable {
         isPlayable: Bool = true,
         hasVideo: Bool? = nil,
         musicVideoType: MusicVideoType? = nil,
+        audioVersionVideoId: String? = nil,
+        videoVersionVideoId: String? = nil,
         likeStatus: LikeStatus? = nil,
         isInLibrary: Bool? = nil,
         feedbackTokens: FeedbackTokens? = nil
@@ -72,6 +82,8 @@ struct Song: Identifiable, Codable, Hashable {
         self.isPlayable = isPlayable
         self.hasVideo = hasVideo
         self.musicVideoType = musicVideoType
+        self.audioVersionVideoId = audioVersionVideoId
+        self.videoVersionVideoId = videoVersionVideoId
         self.likeStatus = likeStatus
         self.isInLibrary = isInLibrary
         self.feedbackTokens = feedbackTokens
@@ -89,6 +101,8 @@ struct Song: Identifiable, Codable, Hashable {
         self.isPlayable = try container.decodeIfPresent(Bool.self, forKey: .isPlayable) ?? true
         self.hasVideo = try container.decodeIfPresent(Bool.self, forKey: .hasVideo)
         self.musicVideoType = try container.decodeIfPresent(MusicVideoType.self, forKey: .musicVideoType)
+        self.audioVersionVideoId = try container.decodeIfPresent(String.self, forKey: .audioVersionVideoId)
+        self.videoVersionVideoId = try container.decodeIfPresent(String.self, forKey: .videoVersionVideoId)
         self.likeStatus = try container.decodeIfPresent(LikeStatus.self, forKey: .likeStatus)
         self.isInLibrary = try container.decodeIfPresent(Bool.self, forKey: .isInLibrary)
         self.feedbackTokens = try container.decodeIfPresent(FeedbackTokens.self, forKey: .feedbackTokens)
@@ -106,6 +120,8 @@ struct Song: Identifiable, Codable, Hashable {
         try container.encode(self.isPlayable, forKey: .isPlayable)
         try container.encodeIfPresent(self.hasVideo, forKey: .hasVideo)
         try container.encodeIfPresent(self.musicVideoType, forKey: .musicVideoType)
+        try container.encodeIfPresent(self.audioVersionVideoId, forKey: .audioVersionVideoId)
+        try container.encodeIfPresent(self.videoVersionVideoId, forKey: .videoVersionVideoId)
         try container.encodeIfPresent(self.likeStatus, forKey: .likeStatus)
         try container.encodeIfPresent(self.isInLibrary, forKey: .isInLibrary)
         try container.encodeIfPresent(self.feedbackTokens, forKey: .feedbackTokens)
@@ -134,6 +150,15 @@ struct Song: Identifiable, Codable, Hashable {
         var components = URLComponents(string: "https://i.ytimg.com/vi/\(self.videoId)/hq720.jpg")
         components?.queryItems = [URLQueryItem(name: "kaset", value: "wide-v2")]
         return components?.url
+    }
+
+    var playbackVariantVideoIds: Set<String> {
+        Set([self.videoId, self.audioVersionVideoId, self.videoVersionVideoId].compactMap(\.self))
+    }
+
+    func isPlaybackVariant(videoId: String?) -> Bool {
+        guard let videoId, !videoId.isEmpty else { return false }
+        return self.playbackVariantVideoIds.contains(videoId)
     }
 }
 

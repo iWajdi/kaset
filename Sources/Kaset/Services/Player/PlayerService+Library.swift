@@ -223,6 +223,8 @@ extension PlayerService {
                     thumbnailURL: songData.thumbnailURL ?? self.currentTrack?.thumbnailURL,
                     videoId: videoId,
                     musicVideoType: songData.musicVideoType,
+                    audioVersionVideoId: self.currentTrack?.audioVersionVideoId,
+                    videoVersionVideoId: self.currentTrack?.videoVersionVideoId,
                     likeStatus: resolvedLikeStatus,
                     isInLibrary: songData.isInLibrary,
                     feedbackTokens: songData.feedbackTokens

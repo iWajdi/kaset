@@ -47,17 +47,154 @@ extension PlayerService {
         song: Song
     ) -> Bool {
         if let observedVideoId = self.normalizedObservedVideoId(observedVideoId) {
-            return song.videoId == observedVideoId
+            return song.isPlaybackVariant(videoId: observedVideoId)
         }
-        return song.title == title && song.artistsDisplay == artist
+        return self.metadataMatchesSong(title: title, artist: artist, song: song)
+            || self.metadataLooksLikePlaybackVariant(title: title, artist: artist, song: song)
     }
 
     private func metadataMatchesSong(title: String, artist: String, song: Song) -> Bool {
         song.title == title && song.artistsDisplay == artist
     }
 
+    private func metadataLooksLikePlaybackVariant(title: String, artist: String, song: Song) -> Bool {
+        let observedTitle = Self.normalizedPlaybackMetadataTitle(title, artist: artist)
+        let songTitle = Self.normalizedPlaybackMetadataTitle(song.title, artist: song.artistsDisplay)
+        guard !observedTitle.isEmpty, !songTitle.isEmpty else { return false }
+
+        let titleMatches = observedTitle == songTitle
+            || observedTitle.contains(songTitle)
+            || songTitle.contains(observedTitle)
+
+        return titleMatches && self.metadataArtistMatches(artist: artist, song: song)
+    }
+
+    private func metadataArtistMatches(artist: String, song: Song) -> Bool {
+        let observedArtist = Self.normalizedPlaybackArtistText(artist)
+        let songArtists = song.artists.map { Self.normalizedPlaybackArtistText($0.name) }.filter { !$0.isEmpty }
+
+        guard !observedArtist.isEmpty, !songArtists.isEmpty else { return true }
+
+        return songArtists.contains { songArtist in
+            observedArtist == songArtist
+                || observedArtist.contains(songArtist)
+                || songArtist.contains(observedArtist)
+        }
+    }
+
+    private static func normalizedPlaybackMetadataTitle(_ title: String, artist: String) -> String {
+        var result = title
+        let decorationPatterns = [
+            #"\s*[\(\[\{][^\)\]\}]*(official|music\s*video|official\s*video|official\s*audio|visualizer|lyric\s*video)[^\)\]\}]*[\)\]\}]"#,
+            #"(?i)\s+-\s+official\s+music\s+video$"#,
+            #"(?i)\s+-\s+official\s+video$"#,
+            #"(?i)\s+-\s+music\s+video$"#,
+            #"(?i)\s+-\s+official\s+audio$"#,
+        ]
+
+        for pattern in decorationPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+
+        let normalizedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !normalizedArtist.isEmpty {
+            let escapedArtist = NSRegularExpression.escapedPattern(for: normalizedArtist)
+            let artistPatterns = [
+                #"(?i)^\s*"# + escapedArtist + #"\s+-\s*"#,
+                #"(?i)\s+-\s*"# + escapedArtist + #"\s*$"#,
+            ]
+
+            for pattern in artistPatterns {
+                result = result.replacingOccurrences(
+                    of: pattern,
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            }
+        }
+
+        return Self.normalizedPlaybackMetadataText(result)
+    }
+
+    private static func normalizedPlaybackMetadataText(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func normalizedPlaybackArtistText(_ text: String) -> String {
+        var result = Self.normalizedPlaybackMetadataText(text)
+        let suffixPatterns = [
+            #"\s*vevo$"#,
+            #"\s+official$"#,
+            #"\s+channel$"#,
+            #"\s+topic$"#,
+        ]
+
+        for pattern in suffixPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: .regularExpression
+            )
+        }
+
+        return result.replacingOccurrences(of: " ", with: "")
+    }
+
     private func shouldKeepQueueMetadata(title: String, artist: String, song: Song) -> Bool {
         title.isEmpty || artist.isEmpty || !self.metadataMatchesSong(title: title, artist: artist, song: song)
+    }
+
+    private func handleNativePlaybackVariantSwitchIfNeeded(
+        observedVideoId: String?,
+        title: String,
+        artist: String,
+        thumbnailUrl: String
+    ) -> Bool {
+        guard let observedVideoId = self.normalizedObservedVideoId(observedVideoId),
+              let currentQueueSong = self.queue[safe: self.currentIndex],
+              !currentQueueSong.isPlaybackVariant(videoId: observedVideoId),
+              self.metadataLooksLikePlaybackVariant(title: title, artist: artist, song: currentQueueSong),
+              self.isNativePlaybackVersionSwitchGraceActive
+              || self.canUseNativePlaybackVersionSwitch && self.nativePlaybackVersionMode != nil
+        else {
+            return false
+        }
+
+        let mode = self.nativePlaybackVersionSwitchTarget ?? self.nativePlaybackVersionMode ?? .video
+        var pairedSong = currentQueueSong
+        switch mode {
+        case .song:
+            pairedSong.audioVersionVideoId = observedVideoId
+            pairedSong.videoVersionVideoId = currentQueueSong.videoVersionVideoId ?? currentQueueSong.videoId
+        case .video:
+            pairedSong.audioVersionVideoId = currentQueueSong.audioVersionVideoId ?? currentQueueSong.videoId
+            pairedSong.videoVersionVideoId = observedVideoId
+            pairedSong.hasVideo = true
+        }
+
+        self.pendingPlayVideoId = observedVideoId
+        SingletonPlayerWebView.shared.currentVideoId = observedVideoId
+        self.keepQueueSongVisible(pairedSong, thumbnailUrl: thumbnailUrl)
+        self.replaceCurrentQueueEntryForNativePlaybackVariant(with: pairedSong)
+        self.saveQueueForPersistence()
+        self.clearNativePlaybackVersionSwitchGrace()
+        self.logger.info("Accepted native \(mode.rawValue) playback switch for '\(pairedSong.title)'")
+        return true
+    }
+
+    private func replaceCurrentQueueEntryForNativePlaybackVariant(with song: Song) {
+        guard self.queueEntries.indices.contains(self.currentIndex) else { return }
+        var updatedEntries = self.queueEntries
+        updatedEntries[self.currentIndex] = QueueEntry(id: updatedEntries[self.currentIndex].id, song: song)
+        self.setQueue(entries: updatedEntries)
     }
 
     private var canAdvanceNativeQueueAfterTrackEnd: Bool {
@@ -102,18 +239,19 @@ extension PlayerService {
             && firstQueueSong.videoId == observedVideoId
     }
 
-    private func keepQueueSongVisible(_ song: Song, thumbnailUrl: String) {
-        let intendedThumbnailURL = URL(string: thumbnailUrl) ?? song.thumbnailURL
+    private func keepQueueSongVisible(_ song: Song, thumbnailUrl _: String) {
         self.currentTrack = Song(
             id: song.id,
             title: song.title,
             artists: song.artists,
             album: song.album,
             duration: song.duration,
-            thumbnailURL: intendedThumbnailURL,
+            thumbnailURL: song.thumbnailURL,
             videoId: song.videoId,
             hasVideo: song.hasVideo,
             musicVideoType: song.musicVideoType,
+            audioVersionVideoId: song.audioVersionVideoId,
+            videoVersionVideoId: song.videoVersionVideoId,
             likeStatus: song.likeStatus,
             isInLibrary: song.isInLibrary,
             feedbackTokens: song.feedbackTokens
@@ -165,7 +303,7 @@ extension PlayerService {
             return false
         }
 
-        let matchesObservedVideo = self.normalizedObservedVideoId(observedVideoId) == intendedSong.videoId
+        let matchesObservedVideo = intendedSong.isPlaybackVariant(videoId: self.normalizedObservedVideoId(observedVideoId))
         if matchesObservedVideo, self.shouldKeepQueueMetadata(title: title, artist: artist, song: intendedSong) {
             self.isKasetInitiatedPlayback = false
             self.logger.debug(
@@ -332,7 +470,7 @@ extension PlayerService {
         guard !self.queue.isEmpty,
               let observedVideoId = self.normalizedObservedVideoId(observedVideoId),
               let currentQueueSong = self.queue[safe: self.currentIndex],
-              currentQueueSong.videoId != observedVideoId
+              !currentQueueSong.isPlaybackVariant(videoId: observedVideoId)
         else {
             return false
         }
@@ -435,7 +573,11 @@ extension PlayerService {
         if let observedVideoId = self.normalizedObservedVideoId(observedVideoId) {
             let currentQueueVideoId = self.queue[safe: self.currentIndex]?.videoId
             let expectedCurrentVideoId = currentQueueVideoId ?? self.currentTrack?.videoId ?? self.pendingPlayVideoId
-            if let expectedCurrentVideoId, expectedCurrentVideoId != observedVideoId {
+            let currentQueueSong = self.queue[safe: self.currentIndex]
+            if let expectedCurrentVideoId,
+               expectedCurrentVideoId != observedVideoId,
+               currentQueueSong?.isPlaybackVariant(videoId: observedVideoId) != true
+            {
                 // Late duplicate `ended` events should not advance the queue twice. The only mismatch
                 // we allow is repeat-all wrapping from the last queue item back to the first song.
                 if self.repeatMode == .one {
@@ -495,6 +637,15 @@ extension PlayerService {
             return
         }
 
+        if self.handleNativePlaybackVariantSwitchIfNeeded(
+            observedVideoId: observedVideoId,
+            title: title,
+            artist: artist,
+            thumbnailUrl: thumbnailUrl
+        ) {
+            return
+        }
+
         if self.handleKasetInitiatedPlaybackMetadata(
             observedVideoId: observedVideoId,
             title: title,
@@ -538,6 +689,22 @@ extension PlayerService {
         // Repeat one: never replace the queue-driven `currentTrack` with YouTube's row (autoplay after idle/end).
         if self.repeatMode == .one, let queued = self.queue[safe: self.currentIndex] {
             self.keepQueueSongVisible(queued, thumbnailUrl: thumbnailUrl)
+            return
+        }
+
+        if let currentQueueSong = self.queue[safe: self.currentIndex],
+           currentQueueSong.isPlaybackVariant(videoId: observedVideoId)
+           || self.metadataLooksLikePlaybackVariant(title: title, artist: artist, song: currentQueueSong)
+        {
+            self.keepQueueSongVisible(currentQueueSong, thumbnailUrl: thumbnailUrl)
+            return
+        }
+
+        if let currentTrack,
+           currentTrack.isPlaybackVariant(videoId: observedVideoId),
+           currentTrack.videoId != resolvedVideoId
+        {
+            self.keepQueueSongVisible(currentTrack, thumbnailUrl: thumbnailUrl)
             return
         }
 

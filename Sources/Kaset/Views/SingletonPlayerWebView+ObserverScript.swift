@@ -281,6 +281,36 @@ extension SingletonPlayerWebView {
                 });
             }
 
+            function avSwitcherState() {
+                const switcher = document.querySelector('ytmusic-av-switcher');
+                if (!switcher) {
+                    return { canSwitch: false, mode: '' };
+                }
+
+                function isActive(button) {
+                    if (!button) return false;
+                    return button.hasAttribute('active')
+                        || button.hasAttribute('selected')
+                        || button.classList.contains('active')
+                        || button.getAttribute('aria-pressed') === 'true'
+                        || button.getAttribute('aria-selected') === 'true';
+                }
+
+                const songButton = switcher.querySelector('#song-button');
+                const videoButton = switcher.querySelector('#video-button');
+                let mode = '';
+                if (isActive(videoButton)) {
+                    mode = 'video';
+                } else if (isActive(songButton)) {
+                    mode = 'song';
+                }
+
+                return {
+                    canSwitch: !!(songButton && videoButton),
+                    mode: mode
+                };
+            }
+
             function sendUpdate() {
                 // Throttle updates
                 const now = Date.now();
@@ -342,6 +372,7 @@ extension SingletonPlayerWebView {
                     const metadataChanged = title !== '' && (title !== lastTitle || artist !== lastArtist);
                     const videoIdChanged = videoId !== '' && videoId !== lastVideoId;
                     const trackChanged = metadataChanged || videoIdChanged;
+                    const nativePlayback = avSwitcherState();
                     if (trackChanged) {
                         if (title !== '') {
                             lastTitle = title;
@@ -379,7 +410,9 @@ extension SingletonPlayerWebView {
                         thumbnailUrl: thumbnailUrl,
                         trackChanged: trackChanged,
                         likeStatus: likeStatus,
-                        hasVideo: hasVideo
+                        hasVideo: hasVideo,
+                        canSwitchPlaybackVariant: nativePlayback.canSwitch,
+                        playbackVariantMode: nativePlayback.mode
                     });
                 } catch (e) {}
             }

@@ -124,6 +124,9 @@ protocol YTMusicClientProtocol: Sendable {
     /// Searches for songs only (filtered search, excludes videos/podcasts/episodes).
     func searchSongs(query: String) async throws -> [Song]
 
+    /// Searches for videos only (filtered search, excludes audio tracks/podcasts/episodes).
+    func searchVideos(query: String) async throws -> [Song]
+
     /// Searches for songs only with pagination support.
     func searchSongsWithPagination(query: String) async throws -> SearchResponse
 
@@ -254,6 +257,9 @@ protocol YTMusicClientProtocol: Sendable {
 
     /// Fetches song metadata by video ID.
     func getSong(videoId: String) async throws -> Song
+
+    /// Resolves the audio-track and official-video counterparts for a song.
+    func getSongPlaybackVersions(for song: Song) async throws -> SongPlaybackVersions
 
     /// Fetches a radio queue (similar songs) based on a video ID.
     /// Returns an array of songs that form a "radio" playlist based on the seed track.

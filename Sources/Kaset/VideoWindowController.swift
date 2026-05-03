@@ -33,6 +33,7 @@ final class VideoWindowController {
 
         // Start grace period to prevent race condition when video element is moved
         playerService.videoWindowDidOpen()
+        playerService.prepareToShowVideoMode()
 
         if let existingWindow = self.window {
             // Window exists - just bring it to front without stealing focus

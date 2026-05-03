@@ -74,8 +74,16 @@ enum SearchResponseParser {
     /// Parses a filtered songs-only search response.
     /// Filtered searches have a simpler structure without tabs.
     static func parseSongsOnly(_ data: [String: Any]) -> [Song] {
-        var songs: [Song] = []
+        self.parsePlayableItemsOnly(data)
+    }
 
+    /// Parses a filtered videos-only search response.
+    static func parseVideosOnly(_ data: [String: Any]) -> [Song] {
+        self.parsePlayableItemsOnly(data)
+    }
+
+    private static func parsePlayableItemsOnly(_ data: [String: Any]) -> [Song] {
+        var songs: [Song] = []
         // Filtered search has a simpler structure - no tabs
         guard let contents = data["contents"] as? [String: Any],
               let sectionListRenderer = contents["sectionListRenderer"] as? [String: Any],
@@ -232,6 +240,7 @@ enum SearchResponseParser {
         let title = ParsingHelpers.extractTitleFromFlexColumns(data) ?? "Unknown"
         let artists = ParsingHelpers.extractArtistsFromFlexColumns(data)
         let album = ParsingHelpers.extractAlbumFromFlexColumns(data)
+        let musicVideoType = ParsingHelpers.extractMusicVideoType(from: data)
 
         let song = Song(
             id: videoId,
@@ -240,7 +249,8 @@ enum SearchResponseParser {
             album: album,
             duration: nil,
             thumbnailURL: thumbnailURL,
-            videoId: videoId
+            videoId: videoId,
+            musicVideoType: musicVideoType
         )
         return .song(song)
     }

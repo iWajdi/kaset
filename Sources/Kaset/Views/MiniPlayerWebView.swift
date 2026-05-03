@@ -516,7 +516,10 @@ final class SingletonPlayerWebView {
             }
 
             guard type == "STATE_UPDATE" else { return }
+            self.handleStateUpdate(body: body, observedVideoId: observedVideoId)
+        }
 
+        private func handleStateUpdate(body: [String: Any], observedVideoId: String?) {
             let isPlaying = body["isPlaying"] as? Bool ?? false
             let progress = body["progress"] as? Int ?? 0
             let duration = body["duration"] as? Int ?? 0
@@ -524,17 +527,14 @@ final class SingletonPlayerWebView {
             let artist = body["artist"] as? String ?? ""
             let thumbnailUrl = body["thumbnailUrl"] as? String ?? ""
             let trackChanged = body["trackChanged"] as? Bool ?? false
-            let likeStatusString = body["likeStatus"] as? String ?? "INDIFFERENT"
             let hasVideo = body["hasVideo"] as? Bool ?? false
+            let canSwitchPlaybackVariant = body["canSwitchPlaybackVariant"] as? Bool ?? false
+            let playbackVariantMode = (body["playbackVariantMode"] as? String)
+                .flatMap(NativePlaybackVersionMode.init(rawValue:))
+            let likeStatus = self.likeStatus(from: body["likeStatus"] as? String)
 
-            // Parse like status
-            let likeStatus: LikeStatus = switch likeStatusString {
-            case "LIKE":
-                .like
-            case "DISLIKE":
-                .dislike
-            default:
-                .indifferent
+            if let observedVideoId {
+                SingletonPlayerWebView.shared.currentVideoId = observedVideoId
             }
 
             Task { @MainActor in
@@ -544,39 +544,69 @@ final class SingletonPlayerWebView {
                     duration: Double(duration)
                 )
 
-                // Update video availability
                 self.playerService.updateVideoAvailability(hasVideo: hasVideo)
+                self.playerService.updateNativePlaybackVersionStatus(
+                    mode: playbackVariantMode,
+                    canSwitch: canSwitchPlaybackVariant
+                )
 
-                // Update like status only when track changes (initial state)
                 if trackChanged {
                     self.playerService.updateLikeStatus(likeStatus)
                 }
 
-                // Repeat-one must keep enforcing queue/current song even if WebView doesn't flag `trackChanged`
-                // for a transient autoplay swap. In other modes, keep the existing trackChanged gate.
-                let shouldReconcileMetadata = (trackChanged || self.playerService.repeatMode == .one)
-                    && (observedVideoId != nil || !title.isEmpty)
+                self.reconcileMetadataIfNeeded(
+                    trackChanged: trackChanged,
+                    observedVideoId: observedVideoId,
+                    title: title,
+                    artist: artist,
+                    thumbnailUrl: thumbnailUrl
+                )
+            }
+        }
 
-                if shouldReconcileMetadata {
-                    self.playerService.updateTrackMetadata(
-                        title: title,
-                        artist: artist,
-                        thumbnailUrl: thumbnailUrl,
-                        videoId: observedVideoId
-                    )
+        private func likeStatus(from rawValue: String?) -> LikeStatus {
+            switch rawValue {
+            case "LIKE":
+                .like
+            case "DISLIKE":
+                .dislike
+            default:
+                .indifferent
+            }
+        }
 
-                    // Close video window on track change, but skip during grace period.
-                    // We only close if the videoId actually changed to prevent closing
-                    // due to spurious metadata (title/artist) glitches during resize.
-                    let videoIdChanged = observedVideoId != nil && observedVideoId != self.playerService.currentTrack?.videoId
+        @MainActor
+        private func reconcileMetadataIfNeeded(
+            trackChanged: Bool,
+            observedVideoId: String?,
+            title: String,
+            artist: String,
+            thumbnailUrl: String
+        ) {
+            // Repeat-one must keep enforcing queue/current song even if WebView doesn't flag `trackChanged`
+            // for a transient autoplay swap. In other modes, keep the existing trackChanged gate.
+            let shouldReconcileMetadata = (trackChanged || self.playerService.repeatMode == .one)
+                && (observedVideoId != nil || !title.isEmpty)
+            guard shouldReconcileMetadata else { return }
 
-                    if self.playerService.showVideo, videoIdChanged, !self.playerService.isVideoGracePeriodActive {
-                        DiagnosticsLogger.player.info(
-                            "trackChanged to videoId '\(observedVideoId ?? "unknown")' while video shown - closing video window"
-                        )
-                        self.playerService.showVideo = false
-                    }
-                }
+            self.playerService.updateTrackMetadata(
+                title: title,
+                artist: artist,
+                thumbnailUrl: thumbnailUrl,
+                videoId: observedVideoId
+            )
+
+            // Close video window on track change, but skip during grace period.
+            // We only close if the videoId actually changed to prevent closing
+            // due to spurious metadata (title/artist) glitches during resize.
+            let videoIdChanged = observedVideoId != nil
+                && self.playerService.currentTrack?.isPlaybackVariant(videoId: observedVideoId) != true
+
+            if self.playerService.showVideo, videoIdChanged, !self.playerService.isVideoGracePeriodActive {
+                DiagnosticsLogger.player.info(
+                    "trackChanged to videoId '\(observedVideoId ?? "unknown")' while video shown - closing video window"
+                )
+                self.playerService.showVideo = false
             }
         }
 

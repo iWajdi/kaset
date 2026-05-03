@@ -159,6 +159,11 @@ final class MockUITestYTMusicClient: YTMusicClientProtocol {
         return self.searchResults.songs
     }
 
+    func searchVideos(query _: String) async throws -> [Song] {
+        try? await Task.sleep(for: .milliseconds(100))
+        return self.searchResults.songs.filter { $0.musicVideoType == .omv }
+    }
+
     func searchSongsWithPagination(query _: String) async throws -> SearchResponse {
         try? await Task.sleep(for: .milliseconds(100))
         return SearchResponse(
@@ -427,6 +432,13 @@ final class MockUITestYTMusicClient: YTMusicClientProtocol {
             artists: [Artist(id: "mock-artist", name: "Mock Artist")],
             videoId: videoId
         )
+    }
+
+    func getSongPlaybackVersions(for song: Song) async throws -> SongPlaybackVersions {
+        try? await Task.sleep(for: .milliseconds(100))
+        let video = self.searchResults.songs.first { $0.musicVideoType == .omv }
+        let audio = song.musicVideoType == .omv ? self.searchResults.songs.first { $0.musicVideoType == .atv } : song
+        return SongPlaybackVersions(audio: audio, video: video)
     }
 
     func getRadioQueue(videoId: String) async throws -> [Song] {

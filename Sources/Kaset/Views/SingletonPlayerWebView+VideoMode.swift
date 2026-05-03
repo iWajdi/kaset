@@ -6,7 +6,13 @@ import WebKit
 extension SingletonPlayerWebView {
     /// Updates WebView size based on display mode.
     func updateDisplayMode(_ mode: DisplayMode) {
-        guard let webView, self.displayMode != mode else { return }
+        guard let webView else { return }
+        if self.displayMode == mode {
+            if mode == .video {
+                self.injectVideoModeCSS()
+            }
+            return
+        }
         DiagnosticsLogger.player.info("SingletonPlayerWebView.updateDisplayMode: \(String(describing: mode), privacy: .public)")
         self.displayMode = mode
 
@@ -129,53 +135,9 @@ extension SingletonPlayerWebView {
     func clickVideoTabAndInjectCSS() {
         guard let webView else { return }
 
-        // The Song/Video toggle is different from the tabs
-        // It appears as a segmented control near the top of the player page
-        let clickVideoTabScript = """
-            (function() {
-                // Method 1: Internal State Enforcement (Most robust)
-                const playerPage = document.querySelector('ytmusic-player-page');
-                if (playerPage && typeof playerPage.videoMode !== 'undefined') {
-                    if (playerPage.videoMode !== true) {
-                        playerPage.videoMode = true;
-                        if (typeof playerPage.onVideoModeChanged === 'function') {
-                            playerPage.onVideoModeChanged();
-                        }
-                        console.log('[Kaset] Forced videoMode = true via property');
-                        return { clicked: true, method: 'propertySet' };
-                    }
-                    return { clicked: false, message: 'Already in video mode (property)' };
-                }
-
-                // Method 2: Click the AV Switcher (Native feel)
-                const switcher = document.querySelector('ytmusic-av-switcher');
-                if (switcher) {
-                    const videoBtn = switcher.querySelector('#video-button');
-                    if (videoBtn && !videoBtn.hasAttribute('active')) {
-                        videoBtn.click();
-                        console.log('[Kaset] Clicked Video toggle via switcher');
-                        return { clicked: true, method: 'switcher' };
-                    }
-                }
-
-                // Method 3: Fallback Button Search
-                const allButtons = document.querySelectorAll('tp-yt-paper-button, button, [role="button"]');
-                for (const btn of allButtons) {
-                    const text = (btn.textContent || btn.innerText || '').trim().toLowerCase();
-                    if (text === 'video') {
-                        const isActive = btn.hasAttribute('active') || btn.classList.contains('active') || btn.getAttribute('aria-pressed') === 'true';
-                        if (!isActive) {
-                            btn.click();
-                            console.log('[Kaset] Clicked Video button by text');
-                            return { clicked: true, method: 'textMatch' };
-                        }
-                        return { clicked: false, message: 'Already in video mode (text)' };
-                    }
-                }
-
-                return { clicked: false, message: 'Video toggle/property not found' };
-            })();
-        """
+        // The Song/Video toggle is different from the tabs. Prefer the native AV switcher
+        // because it asks YouTube Music for the paired video instead of guessing the video id.
+        let clickVideoTabScript = Self.nativePlaybackVersionSwitchScript(target: .video)
 
         webView.evaluateJavaScript(clickVideoTabScript) { [weak self] result, _ in
             // Log if Video tab wasn't found (YouTube UI may have changed)
@@ -196,6 +158,119 @@ extension SingletonPlayerWebView {
             Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(500))
                 self?.injectVideoModeStyles()
+            }
+        }
+    }
+
+    nonisolated static func nativePlaybackVersionSwitchScript(target: NativePlaybackVersionMode) -> String {
+        """
+            (function() {
+                const target = '\(target.rawValue)';
+
+                function isActive(button) {
+                    if (!button) return false;
+                    return button.hasAttribute('active')
+                        || button.hasAttribute('selected')
+                        || button.classList.contains('active')
+                        || button.getAttribute('aria-pressed') === 'true'
+                        || button.getAttribute('aria-selected') === 'true';
+                }
+
+                function clickButton(button, method) {
+                    button.click();
+                    console.log('[Kaset] Clicked native ' + target + ' toggle via ' + method);
+                    return { clicked: true, method: method, target: target };
+                }
+
+                // Method 1: Click the AV Switcher (native pairing).
+                const switcher = document.querySelector('ytmusic-av-switcher');
+                if (switcher) {
+                    const buttonId = target === 'video' ? '#video-button' : '#song-button';
+                    const targetButton = switcher.querySelector(buttonId);
+                    if (targetButton) {
+                        if (!isActive(targetButton)) {
+                            return clickButton(targetButton, 'switcher');
+                        }
+                        return {
+                            clicked: true,
+                            alreadyActive: true,
+                            method: 'switcher',
+                            target: target,
+                            message: 'Already in requested native mode'
+                        };
+                    }
+                }
+
+                // Method 2: Fallback Button Search.
+                const allButtons = document.querySelectorAll('tp-yt-paper-button, button, [role="button"]');
+                for (const btn of allButtons) {
+                    const text = (btn.textContent || btn.innerText || '').trim().toLowerCase();
+                    if (text === target) {
+                        if (!isActive(btn)) {
+                            return clickButton(btn, 'textMatch');
+                        }
+                        return {
+                            clicked: true,
+                            alreadyActive: true,
+                            method: 'textMatch',
+                            target: target,
+                            message: 'Already in requested native mode'
+                        };
+                    }
+                }
+
+                // Method 3: Display fallback for video window. This can show video presentation
+                // when the switcher is missing, but it does not resolve a paired id by itself.
+                if (target === 'video') {
+                    const playerPage = document.querySelector('ytmusic-player-page');
+                    if (playerPage && typeof playerPage.videoMode !== 'undefined') {
+                        if (playerPage.videoMode !== true) {
+                            playerPage.videoMode = true;
+                            if (typeof playerPage.onVideoModeChanged === 'function') {
+                                playerPage.onVideoModeChanged();
+                            }
+                            console.log('[Kaset] Forced videoMode = true via property');
+                            return { clicked: true, method: 'propertySet', target: target };
+                        }
+                        return {
+                            clicked: true,
+                            alreadyActive: true,
+                            method: 'propertySet',
+                            target: target,
+                            message: 'Already in video mode property'
+                        };
+                    }
+                }
+
+                return { clicked: false, target: target, message: 'Native Song/Video toggle not found' };
+            })();
+        """
+    }
+
+    func switchNativePlaybackVersion(to target: NativePlaybackVersionMode) async -> Bool {
+        guard let webView else { return false }
+
+        return await withCheckedContinuation { continuation in
+            webView.evaluateJavaScript(Self.nativePlaybackVersionSwitchScript(target: target)) { [weak self] result, error in
+                if let error {
+                    self?.logger.warning(
+                        "Native playback version switch failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                guard let resultDict = result as? [String: Any] else {
+                    continuation.resume(returning: false)
+                    return
+                }
+
+                let clicked = resultDict["clicked"] as? Bool ?? false
+                if !clicked {
+                    let msg = resultDict["message"] as? String ?? "unknown"
+                    self?.logger.debug("Native playback version switch unavailable: \(msg, privacy: .public)")
+                }
+                continuation.resume(returning: clicked)
             }
         }
     }

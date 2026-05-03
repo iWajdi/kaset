@@ -49,6 +49,7 @@ final class MockYTMusicClient: YTMusicClientProtocol { // swiftlint:disable:this
     var podcastsSections: [PodcastSection] = []
     var podcastsContinuationSections: [[PodcastSection]] = []
     var searchResponse: SearchResponse = .empty
+    var videoSearchSongs: [Song] = []
     var searchContinuationResponses: [SearchResponse] = []
     var searchSuggestions: [SearchSuggestion] = []
     var libraryPlaylists: [Playlist] = []
@@ -159,6 +160,8 @@ final class MockYTMusicClient: YTMusicClientProtocol { // swiftlint:disable:this
     private(set) var getChartsCallCount = 0
     private(set) var searchCalled = false
     private(set) var searchQueries: [String] = []
+    private(set) var searchVideosCalled = false
+    private(set) var searchVideoQueries: [String] = []
     private(set) var getSearchSuggestionsCalled = false
     private(set) var getSearchSuggestionsQueries: [String] = []
     private(set) var getLibraryContentCalled = false
@@ -396,6 +399,13 @@ final class MockYTMusicClient: YTMusicClientProtocol { // swiftlint:disable:this
         self.searchQueries.append(query)
         if let error = shouldThrowError { throw error }
         return self.searchResponse.songs
+    }
+
+    func searchVideos(query: String) async throws -> [Song] {
+        self.searchVideosCalled = true
+        self.searchVideoQueries.append(query)
+        if let error = shouldThrowError { throw error }
+        return self.videoSearchSongs
     }
 
     func searchSongsWithPagination(query: String) async throws -> SearchResponse {
@@ -878,6 +888,19 @@ final class MockYTMusicClient: YTMusicClientProtocol { // swiftlint:disable:this
         )
     }
 
+    func getSongPlaybackVersions(for song: Song) async throws -> SongPlaybackVersions {
+        if let error = shouldThrowError { throw error }
+
+        let audio = self.songResponses[song.audioVersionVideoId ?? song.videoId]
+            ?? self.searchResponse.songs.first
+            ?? (song.musicVideoType == .omv ? nil : song)
+        let video = song.videoVersionVideoId.flatMap { self.songResponses[$0] }
+            ?? self.videoSearchSongs.first
+            ?? (song.musicVideoType == .omv ? song : nil)
+
+        return SongPlaybackVersions(audio: audio, video: video)
+    }
+
     func getRadioQueue(videoId: String) async throws -> [Song] {
         self.getRadioQueueCalled = true
         self.getRadioQueueVideoIds.append(videoId)
@@ -936,6 +959,9 @@ final class MockYTMusicClient: YTMusicClientProtocol { // swiftlint:disable:this
         self._likedSongsContinuationIndex = 0
         self.searchCalled = false
         self.searchQueries = []
+        self.searchVideosCalled = false
+        self.searchVideoQueries = []
+        self.videoSearchSongs = []
         self.getSearchSuggestionsCalled = false
         self.getSearchSuggestionsQueries = []
         self.getLibraryContentCalled = false

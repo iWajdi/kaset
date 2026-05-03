@@ -632,12 +632,55 @@ struct PlayerBar: View {
             .accessibilityLabel(String(localized: "Queue"))
             .accessibilityValue(self.playerService.showQueue ? String(localized: "Showing") : String(localized: "Hidden"))
 
+            // Audio/video version button. This changes the playback source only when the user asks.
+            Button {
+                HapticService.toggle()
+                Task {
+                    await self.playerService.togglePlaybackVersion()
+                }
+            } label: {
+                Group {
+                    if self.playerService.isResolvingPlaybackVersion {
+                        ProgressView()
+                            .controlSize(.mini)
+                    } else {
+                        Image(systemName: self.playerService.isPlayingVideoVersion ? "music.note" : "video")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(self.playerService.isPlayingVideoVersion ? .red : .primary.opacity(0.85))
+                            .contentTransition(.symbolEffect(.replace))
+                    }
+                }
+                .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.pressable)
+            .glassEffectID("playbackVersion", in: self.playerNamespace)
+            .accessibilityIdentifier(AccessibilityID.PlayerBar.playbackVersionButton)
+            .accessibilityLabel(
+                self.playerService.isPlayingVideoVersion
+                    ? String(localized: "Switch to Audio")
+                    : String(localized: "Switch to Video")
+            )
+            .accessibilityValue(
+                self.playerService.isPlayingVideoVersion
+                    ? String(localized: "Video")
+                    : String(localized: "Audio")
+            )
+            .help(
+                self.playerService.isPlayingVideoVersion
+                    ? String(localized: "Switch to Audio")
+                    : String(localized: "Switch to Video")
+            )
+            .disabled(!self.playerService.canTogglePlaybackVersion)
+
             // Video button stays visible so delayed availability detection does not shift the toolbar.
             Button {
                 HapticService.toggle()
                 DiagnosticsLogger.player.debug(
                     "Video button clicked, toggling showVideo from \(self.playerService.showVideo)"
                 )
+                if !self.playerService.showVideo {
+                    self.playerService.prepareToShowVideoMode()
+                }
                 withAnimation(AppAnimation.standard) {
                     player.showVideo.toggle()
                 }

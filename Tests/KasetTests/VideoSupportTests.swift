@@ -77,6 +77,183 @@ struct VideoSupportTests {
         #expect(self.playerService.showVideo == true, "Video window should stay open")
     }
 
+    @Test("togglePlaybackVersion switches to video while keeping audio metadata")
+    func togglePlaybackVersionSwitchesToVideoKeepingAudioMetadata() async {
+        let mockClient = MockYTMusicClient()
+        self.playerService.setYTMusicClient(mockClient)
+
+        let audio = Song(
+            id: "audio-id",
+            title: "Icy",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/audio.jpg"),
+            videoId: "audio-id",
+            musicVideoType: .atv
+        )
+        let video = Song(
+            id: "video-id",
+            title: "Icy - Kim Petras (Official Music Video)",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/video.jpg"),
+            videoId: "video-id",
+            musicVideoType: .omv
+        )
+        mockClient.searchResponse = SearchResponse(songs: [audio], albums: [], artists: [], playlists: [])
+        mockClient.videoSearchSongs = [video]
+        self.playerService.setQueue([audio])
+        self.playerService.currentIndex = 0
+        self.playerService.currentTrack = audio
+        self.playerService.pendingPlayVideoId = audio.videoId
+
+        await self.playerService.togglePlaybackVersion()
+
+        #expect(self.playerService.currentTrack?.videoId == "audio-id")
+        #expect(self.playerService.currentTrack?.title == "Icy")
+        #expect(self.playerService.currentTrack?.videoVersionVideoId == "video-id")
+        #expect(self.playerService.pendingPlayVideoId == "video-id")
+        #expect(self.playerService.isPlayingVideoVersion == true)
+        #expect(self.playerService.queue[0].videoVersionVideoId == "video-id")
+    }
+
+    @Test("togglePlaybackVersion switches back to audio")
+    func togglePlaybackVersionSwitchesBackToAudio() async {
+        let mockClient = MockYTMusicClient()
+        self.playerService.setYTMusicClient(mockClient)
+
+        let audio = Song(
+            id: "audio-id",
+            title: "Icy",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/audio.jpg"),
+            videoId: "audio-id",
+            musicVideoType: .atv,
+            audioVersionVideoId: "audio-id",
+            videoVersionVideoId: "video-id"
+        )
+        let video = Song(
+            id: "video-id",
+            title: "Icy - Kim Petras (Official Music Video)",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/video.jpg"),
+            videoId: "video-id",
+            musicVideoType: .omv,
+            audioVersionVideoId: "audio-id",
+            videoVersionVideoId: "video-id"
+        )
+        mockClient.songResponses["video-id"] = video
+        self.playerService.setQueue([audio])
+        self.playerService.currentIndex = 0
+        self.playerService.currentTrack = audio
+        self.playerService.pendingPlayVideoId = video.videoId
+
+        await self.playerService.togglePlaybackVersion()
+
+        #expect(self.playerService.currentTrack?.videoId == "audio-id")
+        #expect(self.playerService.pendingPlayVideoId == "audio-id")
+        #expect(self.playerService.isPlayingVideoVersion == false)
+    }
+
+    @Test("togglePlaybackVersion switches back using paired queue metadata")
+    func togglePlaybackVersionSwitchesBackUsingPairedQueueMetadata() async {
+        let audio = Song(
+            id: "audio-id",
+            title: "Icy",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/audio.jpg"),
+            videoId: "audio-id",
+            musicVideoType: .atv,
+            audioVersionVideoId: "audio-id",
+            videoVersionVideoId: "video-id"
+        )
+        let observedVideo = Song(
+            id: "video-id",
+            title: "Icy - Kim Petras (Official Music Video)",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/video.jpg"),
+            videoId: "video-id",
+            musicVideoType: .omv
+        )
+
+        self.playerService.setQueue([audio])
+        self.playerService.currentIndex = 0
+        self.playerService.currentTrack = observedVideo
+        self.playerService.pendingPlayVideoId = "video-id"
+
+        await self.playerService.togglePlaybackVersion()
+
+        #expect(self.playerService.currentTrack?.videoId == "audio-id")
+        #expect(self.playerService.currentTrack?.title == "Icy")
+        #expect(self.playerService.currentTrack?.thumbnailURL?.absoluteString == "https://example.com/audio.jpg")
+        #expect(self.playerService.pendingPlayVideoId == "audio-id")
+        #expect(self.playerService.isPlayingVideoVersion == false)
+    }
+
+    @Test("video variant metadata does not replace audio playbar metadata")
+    func videoVariantMetadataDoesNotReplaceAudioPlaybarMetadata() {
+        let audio = Song(
+            id: "audio-id",
+            title: "Icy",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/audio.jpg"),
+            videoId: "audio-id",
+            musicVideoType: .atv,
+            audioVersionVideoId: "audio-id",
+            videoVersionVideoId: "video-id"
+        )
+        self.playerService.setQueue([audio])
+        self.playerService.currentIndex = 0
+        self.playerService.currentTrack = audio
+        self.playerService.pendingPlayVideoId = "video-id"
+
+        self.playerService.updateTrackMetadata(
+            title: "Icy - Kim Petras (Official Music Video)",
+            artist: "Kim Petras",
+            thumbnailUrl: "https://example.com/video.jpg",
+            videoId: "video-id"
+        )
+
+        #expect(self.playerService.currentTrack?.videoId == "audio-id")
+        #expect(self.playerService.currentTrack?.title == "Icy")
+        #expect(self.playerService.currentTrack?.thumbnailURL?.absoluteString == "https://example.com/audio.jpg")
+    }
+
+    @Test("video variant metadata without observed id does not replace audio thumbnail")
+    func videoVariantMetadataWithoutObservedIdDoesNotReplaceAudioThumbnail() {
+        let audio = Song(
+            id: "audio-id",
+            title: "Icy",
+            artists: [Artist(id: "artist-1", name: "Kim Petras")],
+            duration: 190,
+            thumbnailURL: URL(string: "https://example.com/audio.jpg"),
+            videoId: "audio-id",
+            musicVideoType: .atv,
+            audioVersionVideoId: "audio-id",
+            videoVersionVideoId: "video-id"
+        )
+        self.playerService.setQueue([audio])
+        self.playerService.currentIndex = 0
+        self.playerService.currentTrack = audio
+        self.playerService.pendingPlayVideoId = "video-id"
+
+        self.playerService.updateTrackMetadata(
+            title: "Icy - Kim Petras (Official Music Video)",
+            artist: "Kim Petras",
+            thumbnailUrl: "https://example.com/video.jpg",
+            videoId: nil
+        )
+
+        #expect(self.playerService.currentTrack?.videoId == "audio-id")
+        #expect(self.playerService.currentTrack?.title == "Icy")
+        #expect(self.playerService.currentTrack?.thumbnailURL?.absoluteString == "https://example.com/audio.jpg")
+    }
+
     // MARK: - Model Tests
 
     @Test("Song.hasVideo property exists and defaults to nil")

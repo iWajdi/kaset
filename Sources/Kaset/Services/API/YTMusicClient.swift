@@ -399,12 +399,28 @@ final class YTMusicClient: YTMusicClientProtocol {
         return songs
     }
 
+    /// Searches for videos only (filtered search).
+    func searchVideos(query: String) async throws -> [Song] {
+        self.logger.info("Searching videos only for: \(query)")
+
+        let body: [String: Any] = [
+            "query": query,
+            "params": SearchFilterParams.videos,
+        ]
+
+        let data = try await request("search", body: body, ttl: APICache.TTL.search)
+        let videos = SearchResponseParser.parseVideosOnly(data)
+        self.logger.info("Videos search found \(videos.count) videos")
+        return videos
+    }
+
     // MARK: - Filtered Search with Pagination
 
     /// Filter params for YouTube Music search.
     /// Pattern: EgWKAQ (base) + filter code + AWoMEA4QChADEAQQCRAF (no spelling correction)
     private enum SearchFilterParams {
         static let songs = "EgWKAQIIAWoMEA4QChADEAQQCRAF"
+        static let videos = "EgWKAQIQAWoQEAMQBBAFEBAQCRAKEBUQEQ%3D%3D"
         static let albums = "EgWKAQIYAWoMEA4QChADEAQQCRAF"
         static let artists = "EgWKAQIgAWoMEA4QChADEAQQCRAF"
         static let playlists = "EgWKAQIoAWoMEA4QChADEAQQCRAF"
@@ -1220,6 +1236,44 @@ final class YTMusicClient: YTMusicClientProtocol {
         return song
     }
 
+    /// Resolves audio and official-video counterparts through filtered search.
+    func getSongPlaybackVersions(for song: Song) async throws -> SongPlaybackVersions {
+        self.logger.info("Resolving playback versions for: \(song.title)")
+
+        var audio = song.musicVideoType == .atv ? song : nil
+        var video = song.musicVideoType == .omv ? song : nil
+
+        for query in Self.playbackVersionSearchQueries(for: song) {
+            if audio == nil {
+                let songs = try await self.searchSongs(query: query)
+                audio = Self.bestPlaybackVersion(
+                    for: song,
+                    in: songs,
+                    target: .audio
+                )
+            }
+
+            if video == nil {
+                let videos = try await self.searchVideos(query: query)
+                video = Self.bestPlaybackVersion(
+                    for: song,
+                    in: videos,
+                    target: .video
+                )
+            }
+
+            if audio != nil, video != nil {
+                break
+            }
+        }
+
+        let versions = Self.withPairedVersionIds(audio: audio, video: video)
+        self.logger.info(
+            "Resolved playback versions - audio: \(versions.audio?.videoId ?? "nil"), video: \(versions.video?.videoId ?? "nil")"
+        )
+        return versions
+    }
+
     // MARK: - Mood/Genre Category
 
     /// Fetches content for a moods/genres category page.
@@ -1760,5 +1814,220 @@ final class YTMusicClient: YTMusicClientProtocol {
         } catch {
             return .networkError(error)
         }
+    }
+}
+
+private extension YTMusicClient {
+    enum PlaybackVersionTarget {
+        case audio
+        case video
+    }
+
+    static func playbackVersionSearchQueries(for song: Song) -> [String] {
+        let title = Self.searchTitle(from: song)
+        let artist = song.artists.first?.name ?? song.artistsDisplay
+        let primaryQuery = [title, artist]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let fallbackQuery = [song.title, artist]
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let titleOnlyQuery = title.isEmpty ? song.title : title
+
+        var queries: [String] = []
+        for query in [primaryQuery, fallbackQuery, titleOnlyQuery] where !query.isEmpty && !queries.contains(query) {
+            queries.append(query)
+        }
+        return queries
+    }
+
+    static func bestPlaybackVersion(
+        for source: Song,
+        in candidates: [Song],
+        target: PlaybackVersionTarget
+    ) -> Song? {
+        let scoredCandidates = candidates.compactMap { candidate -> (song: Song, score: Int)? in
+            guard Self.candidate(candidate, matches: source, target: target) else { return nil }
+            return (candidate, Self.playbackVersionScore(candidate, source: source, target: target))
+        }
+
+        return scoredCandidates.max { lhs, rhs in
+            if lhs.score == rhs.score {
+                return lhs.song.title.count > rhs.song.title.count
+            }
+            return lhs.score < rhs.score
+        }?.song
+    }
+
+    static func withPairedVersionIds(audio: Song?, video: Song?) -> SongPlaybackVersions {
+        var pairedAudio = audio
+        var pairedVideo = video
+
+        let audioId = pairedAudio?.videoId
+        let videoId = pairedVideo?.videoId
+
+        pairedAudio?.audioVersionVideoId = audioId
+        pairedAudio?.videoVersionVideoId = videoId
+        pairedVideo?.audioVersionVideoId = audioId
+        pairedVideo?.videoVersionVideoId = videoId
+
+        return SongPlaybackVersions(audio: pairedAudio, video: pairedVideo)
+    }
+
+    static func candidate(_ candidate: Song, matches source: Song, target: PlaybackVersionTarget) -> Bool {
+        switch target {
+        case .audio:
+            guard candidate.musicVideoType == nil || candidate.musicVideoType == .atv else { return false }
+        case .video:
+            guard candidate.musicVideoType == .omv else { return false }
+        }
+
+        let sourceTitle = Self.normalizedTitleForMatching(source.title, artists: source.artists)
+        let candidateTitle = Self.normalizedTitleForMatching(candidate.title, artists: candidate.artists)
+        guard !sourceTitle.isEmpty, !candidateTitle.isEmpty else { return false }
+
+        let titleMatches = sourceTitle == candidateTitle
+            || sourceTitle.contains(candidateTitle)
+            || candidateTitle.contains(sourceTitle)
+        let artistsMatch = Self.artistsOverlap(source.artists, candidate.artists)
+
+        return titleMatches && (artistsMatch || source.artists.isEmpty || candidate.artists.isEmpty)
+    }
+
+    static func playbackVersionScore(
+        _ candidate: Song,
+        source: Song,
+        target: PlaybackVersionTarget
+    ) -> Int {
+        let sourceTitle = Self.normalizedTitleForMatching(source.title, artists: source.artists)
+        let candidateTitle = Self.normalizedTitleForMatching(candidate.title, artists: candidate.artists)
+        let rawTitle = candidate.title.lowercased()
+
+        var score = 0
+        if source.videoId == candidate.videoId {
+            score += 100
+        }
+        if sourceTitle == candidateTitle {
+            score += 40
+        } else if sourceTitle.contains(candidateTitle) || candidateTitle.contains(sourceTitle) {
+            score += 25
+        }
+        if Self.artistsOverlap(source.artists, candidate.artists) {
+            score += 30
+        }
+
+        switch target {
+        case .audio:
+            if candidate.musicVideoType == .atv {
+                score += 30
+            }
+        case .video:
+            if candidate.musicVideoType == .omv {
+                score += 30
+            }
+            if rawTitle.contains("official music video") || rawTitle.contains("official video") {
+                score += 20
+            }
+            if rawTitle.contains("live") || rawTitle.contains("performance") {
+                score -= 20
+            }
+        }
+
+        return score
+    }
+
+    static func artistsOverlap(_ lhs: [Artist], _ rhs: [Artist]) -> Bool {
+        let lhsNames = lhs.map { Self.normalizedArtistComparableText($0.name) }.filter { !$0.isEmpty }
+        let rhsNames = rhs.map { Self.normalizedArtistComparableText($0.name) }.filter { !$0.isEmpty }
+
+        guard !lhsNames.isEmpty, !rhsNames.isEmpty else { return false }
+
+        return lhsNames.contains { lhsName in
+            rhsNames.contains { rhsName in
+                lhsName == rhsName || lhsName.contains(rhsName) || rhsName.contains(lhsName)
+            }
+        }
+    }
+
+    static func searchTitle(from song: Song) -> String {
+        let title = Self.titleRemovingVideoDecorations(song.title)
+        return Self.titleRemovingArtistAffixes(title, artists: song.artists)
+    }
+
+    static func normalizedTitleForMatching(_ title: String, artists: [Artist]) -> String {
+        let searchTitle = Self.titleRemovingArtistAffixes(
+            Self.titleRemovingVideoDecorations(title),
+            artists: artists
+        )
+        return Self.normalizedComparableText(searchTitle)
+    }
+
+    static func titleRemovingVideoDecorations(_ title: String) -> String {
+        var result = title
+        let patterns = [
+            #"\s*[\(\[\{][^\)\]\}]*(official|music\s*video|official\s*video|official\s*audio|visualizer|lyric\s*video)[^\)\]\}]*[\)\]\}]"#,
+            #"(?i)\s+-\s+official\s+music\s+video$"#,
+            #"(?i)\s+-\s+official\s+video$"#,
+            #"(?i)\s+-\s+music\s+video$"#,
+            #"(?i)\s+-\s+official\s+audio$"#,
+        ]
+
+        for pattern in patterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: [.regularExpression, .caseInsensitive]
+            )
+        }
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func titleRemovingArtistAffixes(_ title: String, artists: [Artist]) -> String {
+        var result = title.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        for artist in artists {
+            let escapedArtist = NSRegularExpression.escapedPattern(for: artist.name)
+            let patterns = [
+                #"(?i)^\s*"# + escapedArtist + #"\s+-\s*"#,
+                #"(?i)\s+-\s*"# + escapedArtist + #"\s*$"#,
+            ]
+            for pattern in patterns {
+                result = result.replacingOccurrences(
+                    of: pattern,
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            }
+        }
+
+        return result.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func normalizedComparableText(_ text: String) -> String {
+        text
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .lowercased()
+            .replacingOccurrences(of: #"[^a-z0-9]+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func normalizedArtistComparableText(_ text: String) -> String {
+        var result = Self.normalizedComparableText(text)
+        let suffixPatterns = [
+            #"\s*vevo$"#,
+            #"\s+official$"#,
+            #"\s+channel$"#,
+            #"\s+topic$"#,
+        ]
+
+        for pattern in suffixPatterns {
+            result = result.replacingOccurrences(
+                of: pattern,
+                with: "",
+                options: .regularExpression
+            )
+        }
+
+        return result.replacingOccurrences(of: " ", with: "")
     }
 }

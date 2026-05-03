@@ -468,6 +468,7 @@ let body = ["query": "never gonna give you up"]
 | Filter | Param Value | Description |
 |--------|-------------|-------------|
 | Songs | `EgWKAQIIAWoMEA4QChADEAQQCRAF` | Filter to songs only |
+| Videos | `EgWKAQIQAWoQEAMQBBAFEBAQCRAKEBUQEQ%3D%3D` | Filter to videos only |
 | Albums | `EgWKAQIYAWoMEA4QChADEAQQCRAF` | Filter to albums only |
 | Artists | `EgWKAQIgAWoMEA4QChADEAQQCRAF` | Filter to artists only |
 | Playlists | `EgWKAQIoAWoMEA4QChADEAQQCRAF` | Filter to all playlists |
@@ -475,7 +476,7 @@ let body = ["query": "never gonna give you up"]
 | Community Playlists | `EgeKAQQoAEABagwQDhAKEAMQBBAJEAU=` | User-created playlists |
 | Podcasts | `EgWKAQJQAWoQEBAQCRAEEAMQBRAKEBUQEQ%3D%3D` | Filter to podcast shows only |
 
-> **Filter Pattern**: `EgWKAQ` (base) + filter code + `AWoMEA4QChADEAQQCRAF` (no spelling correction suffix). The filter code encodes the content type (songs=II, albums=IY, artists=Ig, playlists=Io, podcasts=JQ).
+> **Filter Pattern**: `EgWKAQ` (base) + filter code + suffix. The filter code encodes the content type (songs=II, videos=IQ, albums=IY, artists=Ig, playlists=Io, podcasts=JQ). Songs/albums/artists/playlists use the no-spelling-correction suffix `AWoMEA4QChADEAQQCRAF`; videos and podcasts use endpoint-specific suffixes observed from the web client.
 
 **Usage Example** (podcasts):
 ```swift
