@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - ArtistProfileKind
 
-enum ArtistProfileKind: String, Codable, Hashable, Sendable {
+enum ArtistProfileKind: String, Codable, Hashable {
     case artist
     case profile
     case unknown
@@ -11,7 +11,7 @@ enum ArtistProfileKind: String, Codable, Hashable, Sendable {
 // MARK: - Artist
 
 /// Represents an artist from YouTube Music.
-struct Artist: Identifiable, Codable, Hashable, Sendable {
+struct Artist: Identifiable, Codable, Hashable {
     let id: String
     let name: String
     let thumbnailURL: URL?

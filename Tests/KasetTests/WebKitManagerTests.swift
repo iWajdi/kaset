@@ -18,7 +18,7 @@ struct WebKitManagerTests {
     }
 
     @Test("Test instance starts without loaded extensions")
-    func testInstanceStartsWithoutLoadedExtensions() {
+    func instanceStartsWithoutLoadedExtensions() {
         #expect(self.webKitManager.isExtensionLoaded == false)
         #expect(self.webKitManager.loadedExtensionCount == 0)
     }

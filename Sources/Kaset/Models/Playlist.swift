@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Playlist
 
 /// Represents a playlist from YouTube Music.
-struct Playlist: Identifiable, Codable, Hashable, Sendable {
+struct Playlist: Identifiable, Codable, Hashable {
     static let uploadedSongsBrowseID = "FEmusic_library_privately_owned_tracks"
 
     let id: String

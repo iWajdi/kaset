@@ -558,7 +558,7 @@ enum ParsingHelpers {
             return false
         }
 
-        return (1900...2100).contains(year)
+        return (1900 ... 2100).contains(year)
     }
 
     private static func isNaturalLanguageDuration(_ text: String) -> Bool {
